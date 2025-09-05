@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+mod embed;
 mod index;
 mod symbols;
 

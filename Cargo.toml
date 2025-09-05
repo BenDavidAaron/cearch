@@ -4,7 +4,9 @@ name = "cearch"
 version = "0.1.0"
 
 [dependencies]
+anyhow = "1"
 clap = {version = "4.5.47", features = ["derive"]}
+directories = "6.0.0"
 fastembed = "5.1.0"
 streaming-iterator = "0.1"
 tree-sitter = "0.25.8"
