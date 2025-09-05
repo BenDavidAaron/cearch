@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 mod index;
+mod symbols;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -59,7 +60,20 @@ fn main() {
             match index::list_git_tracked_files(&root) {
                 Ok(files) => {
                     for f in files {
-                        println!("{}", f.display());
+                        match symbols::enumerate_symbols_in_file(&f) {
+                            Ok(symbols) => {
+                                for s in symbols {
+                                    let kind = match s.kind {
+                                        symbols::SymbolKind::Function => "fn",
+                                        symbols::SymbolKind::Class => "class",
+                                    };
+                                    println!("{}:{} {} {}", s.path.display(), s.line, kind, s.name);
+                                }
+                            }
+                            Err(err) => {
+                                eprintln!("warn: failed to parse {}: {}", f.display(), err);
+                            }
+                        }
                     }
                 }
                 Err(err) => {

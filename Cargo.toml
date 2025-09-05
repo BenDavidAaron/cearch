@@ -4,4 +4,8 @@ name = "cearch"
 version = "0.1.0"
 
 [dependencies]
-clap = {version = "4", features = ["derive"]}
+clap = {version = "4.5.47", features = ["derive"]}
+streaming-iterator = "0.1"
+tree-sitter = "0.25.8"
+tree-sitter-python = "0.23"
+tree-sitter-rust = "0.24.0"

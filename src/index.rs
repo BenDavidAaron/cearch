@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+// Index module handles repository discovery and file enumeration only.
 
 /// Walk upward from a starting path to locate the root directory of a Git repository.
 ///
@@ -72,6 +73,9 @@ pub fn list_git_tracked_files(repo_root: impl AsRef<Path>) -> Result<Vec<PathBuf
 
     Ok(files)
 }
+
+// Re-export for external callers
+// No public re-exports from here; use the `symbols` module directly.
 
 #[cfg(test)]
 mod tests {
