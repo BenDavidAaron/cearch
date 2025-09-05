@@ -16,6 +16,7 @@ pub struct Symbol {
     pub line: usize,
     pub kind: SymbolKind,
     pub name: String,
+    pub code: String,
 }
 
 struct LanguageConfig {
@@ -38,13 +39,13 @@ fn language_registry() -> &'static [LanguageConfig] {
         LanguageConfig {
             language: lang_python,
             extensions: &["py"],
-            function_query: r#"(function_definition name: (identifier) @name)"#,
-            class_query: Some(r#"(class_definition name: (identifier) @name)"#),
+            function_query: r#"(function_definition name: (identifier) @name) @node"#,
+            class_query: Some(r#"(class_definition name: (identifier) @name) @node"#),
         },
         LanguageConfig {
             language: lang_rust,
             extensions: &["rs"],
-            function_query: r#"(function_item name: (identifier) @name)"#,
+            function_query: r#"(function_item name: (identifier) @name) @node"#,
             class_query: None,
         },
     ]
@@ -90,20 +91,32 @@ pub fn enumerate_symbols_in_file(path: &Path) -> Result<Vec<Symbol>, String> {
         let name_idx = query
             .capture_index_for_name("name")
             .ok_or_else(|| "query missing @name capture".to_string())?;
+        let node_idx = query
+            .capture_index_for_name("node")
+            .ok_or_else(|| "query missing @node capture".to_string())?;
         let mut cursor = QueryCursor::new();
         let mut matches = cursor.matches(&query, root, source.as_bytes());
         while let Some(m) = matches.next() {
+            let mut name_text: Option<String> = None;
+            let mut def_node: Option<tree_sitter::Node> = None;
             for c in m.captures {
                 if c.index == name_idx {
-                    let name = &source[c.node.byte_range()];
-                    let line = c.node.start_position().row + 1;
-                    symbols.push(Symbol {
-                        path: path.to_path_buf(),
-                        line,
-                        kind: kind.clone(),
-                        name: name.to_string(),
-                    });
+                    name_text = Some(source[c.node.byte_range()].to_string());
+                } else if c.index == node_idx {
+                    def_node = Some(c.node);
                 }
+            }
+
+            if let (Some(name), Some(def_node)) = (name_text, def_node) {
+                let line = def_node.start_position().row + 1;
+                let code = source[def_node.byte_range()].to_string();
+                symbols.push(Symbol {
+                    path: path.to_path_buf(),
+                    line,
+                    kind: kind.clone(),
+                    name,
+                    code,
+                });
             }
         }
         Ok(())

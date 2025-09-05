@@ -67,7 +67,14 @@ fn main() {
                                         symbols::SymbolKind::Function => "fn",
                                         symbols::SymbolKind::Class => "class",
                                     };
-                                    println!("{}:{} {} {}", s.path.display(), s.line, kind, s.name);
+                                    println!(
+                                        "{}:{} {} {}\n{}\n",
+                                        s.path.display(),
+                                        s.line,
+                                        kind,
+                                        s.name,
+                                        s.code
+                                    );
                                 }
                             }
                             Err(err) => {
