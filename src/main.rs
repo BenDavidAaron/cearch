@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+mod index;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -16,8 +17,6 @@ struct Cli {
 enum Commands {
     /// Index a repository into embeddings and a vector index
     Index {
-        /// Path to the repository root to index
-        path: String,
         /// Optional flag to force re-indexing
         #[arg(long)]
         force: bool,
@@ -41,8 +40,33 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Index { path: _, force: _ } => {
-            todo!("implement index subcommand")
+        Commands::Index { force: _ } => {
+            let cwd = match std::env::current_dir() {
+                Ok(dir) => dir,
+                Err(err) => {
+                    eprintln!("error: failed to read current directory: {}", err);
+                    std::process::exit(2);
+                }
+            };
+
+            let root = match index::find_git_root(&cwd) {
+                Some(dir) => dir,
+                None => {
+                    eprintln!("error: not inside a git repository: {}", cwd.display());
+                    std::process::exit(2);
+                }
+            };
+            match index::list_git_tracked_files(&root) {
+                Ok(files) => {
+                    for f in files {
+                        println!("{}", f.display());
+                    }
+                }
+                Err(err) => {
+                    eprintln!("error: {}", err);
+                    std::process::exit(2);
+                }
+            }
         }
         Commands::Query {
             query: _,
