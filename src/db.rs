@@ -86,9 +86,9 @@ impl DB {
         Ok(())
     }
 
-    pub fn knn(&self, query: &[f32], k: usize) -> Result<Vec<(PathBuf, usize, f32)>> {
+    pub fn knn(&self, query: &[f32], k: usize) -> Result<Vec<(PathBuf, usize, String, f32)>> {
         let mut stmt = self.conn.prepare(
-            "SELECT s.path, s.line, v.distance \
+            "SELECT s.path, s.line, s.name, v.distance \
              FROM ( \
                SELECT rowid, distance \
                FROM vec_index \
@@ -102,8 +102,9 @@ impl DB {
         let rows = stmt.query_map(params![f32s_to_blob(query), k as i64], |row| {
             let path: String = row.get(0)?;
             let line: i64 = row.get(1)?;
-            let dist: f32 = row.get(2)?;
-            Ok((PathBuf::from(path), line as usize, dist))
+            let name: String = row.get(2)?;
+            let dist: f32 = row.get(3)?;
+            Ok((PathBuf::from(path), line as usize, name, dist))
         })?;
         let mut out = Vec::new();
         for r in rows {

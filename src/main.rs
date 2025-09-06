@@ -165,9 +165,9 @@ fn main() {
 
             match db.knn(&embedding, num_results) {
                 Ok(results) => {
-                    for (path, line, dist) in results {
+                    for (path, line, name, dist) in results {
                         let rel = path.strip_prefix(&root).unwrap_or(&path);
-                        println!("{}:{} {:.3}", rel.display(), line, dist);
+                        println!("{}:{} {} {:.3}", rel.display(), line, name, dist);
                     }
                 }
                 Err(err) => {
