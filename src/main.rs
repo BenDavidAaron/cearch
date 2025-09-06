@@ -1,4 +1,6 @@
 use clap::{Parser, Subcommand};
+mod db;
+mod embed;
 mod index;
 mod symbols;
 
@@ -31,10 +33,7 @@ enum Commands {
         num_results: usize,
     },
     /// Clean the index and embeddings for a repository
-    Clean {
-        /// Path to the repository whose index should be cleaned
-        path: String,
-    },
+    Clean {},
 }
 
 fn main() {
@@ -59,27 +58,53 @@ fn main() {
             };
             match index::list_git_tracked_files(&root) {
                 Ok(files) => {
+                    let mut all_symbols = Vec::new();
                     for f in files {
                         match symbols::enumerate_symbols_in_file(&f) {
-                            Ok(symbols) => {
-                                for s in symbols {
-                                    let kind = match s.kind {
-                                        symbols::SymbolKind::Function => "fn",
-                                        symbols::SymbolKind::Class => "class",
-                                    };
-                                    println!(
-                                        "{}:{} {} {}\n{}\n",
-                                        s.path.display(),
-                                        s.line,
-                                        kind,
-                                        s.name,
-                                        s.code
-                                    );
-                                }
-                            }
+                            Ok(mut symbols) => all_symbols.append(&mut symbols),
+                            Err(err) => eprintln!("warn: failed to parse {}: {}", f.display(), err),
+                        }
+                    }
+
+                    let mut embedder = match embed::Embedder::new_default() {
+                        Ok(e) => e,
+                        Err(err) => {
+                            eprintln!("error: failed to init embedder: {}", err);
+                            std::process::exit(2);
+                        }
+                    };
+
+                    let embeddings =
+                        match embedder.embed(all_symbols.iter().map(|s| s.code.as_str())) {
+                            Ok(v) => v,
                             Err(err) => {
-                                eprintln!("warn: failed to parse {}: {}", f.display(), err);
+                                eprintln!("error: failed to embed: {}", err);
+                                std::process::exit(2);
                             }
+                        };
+
+                    let db = match db::DB::open(&root) {
+                        Ok(db) => db,
+                        Err(err) => {
+                            eprintln!("error: failed to open sqlite index: {}", err);
+                            std::process::exit(2);
+                        }
+                    };
+
+                    for (sym, emb) in all_symbols.into_iter().zip(embeddings.into_iter()) {
+                        let kind = match sym.kind {
+                            symbols::SymbolKind::Function => "fn",
+                            symbols::SymbolKind::Class => "class",
+                        };
+                        if let Err(err) =
+                            db.insert_symbol(&sym.path, sym.line, kind, &sym.name, &sym.code, &emb)
+                        {
+                            eprintln!(
+                                "warn: failed to insert symbol {}:{}: {}",
+                                sym.path.display(),
+                                sym.line,
+                                err
+                            );
                         }
                     }
                 }
@@ -95,8 +120,45 @@ fn main() {
         } => {
             todo!("implement query subcommand")
         }
-        Commands::Clean { path: _ } => {
-            todo!("implement clean subcommand")
+        Commands::Clean {} => {
+            // Resolve repo root from current working directory
+            let cwd = match std::env::current_dir() {
+                Ok(dir) => dir,
+                Err(err) => {
+                    eprintln!("error: failed to read current directory: {}", err);
+                    std::process::exit(2);
+                }
+            };
+            let root = match index::find_git_root(&cwd) {
+                Some(dir) => dir,
+                None => {
+                    eprintln!("error: not inside a git repository: {}", cwd.display());
+                    std::process::exit(2);
+                }
+            };
+
+            let db_path = root.join(".cearch").join("index.sqlite");
+            let wal_path = root.join(".cearch").join("index.sqlite-wal");
+            let shm_path = root.join(".cearch").join("index.sqlite-shm");
+
+            // Helper to try deletion and ignore NotFound
+            fn try_remove(p: &std::path::Path) -> std::io::Result<()> {
+                match std::fs::remove_file(p) {
+                    Ok(()) => Ok(()),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                    Err(e) => Err(e),
+                }
+            }
+
+            if let Err(err) = try_remove(&db_path)
+                .and_then(|_| try_remove(&wal_path))
+                .and_then(|_| try_remove(&shm_path))
+            {
+                eprintln!("error: failed to delete index: {}", err);
+                std::process::exit(2);
+            } else {
+                println!("cleaned: {}", db_path.display());
+            }
         }
     }
 }
