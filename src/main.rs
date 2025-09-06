@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+mod db;
 mod embed;
 mod index;
 mod symbols;
@@ -60,27 +61,53 @@ fn main() {
             };
             match index::list_git_tracked_files(&root) {
                 Ok(files) => {
+                    let mut all_symbols = Vec::new();
                     for f in files {
                         match symbols::enumerate_symbols_in_file(&f) {
-                            Ok(symbols) => {
-                                for s in symbols {
-                                    let kind = match s.kind {
-                                        symbols::SymbolKind::Function => "fn",
-                                        symbols::SymbolKind::Class => "class",
-                                    };
-                                    println!(
-                                        "{}:{} {} {}\n{}\n",
-                                        s.path.display(),
-                                        s.line,
-                                        kind,
-                                        s.name,
-                                        s.code
-                                    );
-                                }
-                            }
+                            Ok(mut symbols) => all_symbols.append(&mut symbols),
+                            Err(err) => eprintln!("warn: failed to parse {}: {}", f.display(), err),
+                        }
+                    }
+
+                    let mut embedder = match embed::Embedder::new_default() {
+                        Ok(e) => e,
+                        Err(err) => {
+                            eprintln!("error: failed to init embedder: {}", err);
+                            std::process::exit(2);
+                        }
+                    };
+
+                    let embeddings =
+                        match embedder.embed(all_symbols.iter().map(|s| s.code.as_str())) {
+                            Ok(v) => v,
                             Err(err) => {
-                                eprintln!("warn: failed to parse {}: {}", f.display(), err);
+                                eprintln!("error: failed to embed: {}", err);
+                                std::process::exit(2);
                             }
+                        };
+
+                    let db = match db::DB::open(&root) {
+                        Ok(db) => db,
+                        Err(err) => {
+                            eprintln!("error: failed to open sqlite index: {}", err);
+                            std::process::exit(2);
+                        }
+                    };
+
+                    for (sym, emb) in all_symbols.into_iter().zip(embeddings.into_iter()) {
+                        let kind = match sym.kind {
+                            symbols::SymbolKind::Function => "fn",
+                            symbols::SymbolKind::Class => "class",
+                        };
+                        if let Err(err) =
+                            db.insert_symbol(&sym.path, sym.line, kind, &sym.name, &sym.code, &emb)
+                        {
+                            eprintln!(
+                                "warn: failed to insert symbol {}:{}: {}",
+                                sym.path.display(),
+                                sym.line,
+                                err
+                            );
                         }
                     }
                 }
