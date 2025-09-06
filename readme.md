@@ -10,7 +10,7 @@
    - add `.cearch/` to your .gitignore
    - download an embedding model and cache it in `.cearch/`
 2. index your repo by running `cearch index`
-3. search indexed symbols by using `cearch query -n $NUM_HITS`
+3. search indexed symbols by using `cearch query 'pub fn nothing() {'  -n $NUM_HITS`
 4. delete your saved index and cached embedding models with `cearch clean`
 
 ## Development
