@@ -14,6 +14,6 @@ Walks through all code files nested below the provided path, builds an AST with 
 
 A query string is embedded and it's 7 nearest neighbors are returned.
 
-`cearch clean ./path/to/repo/`
+`cearch clean`
 
 The embedding model and index are deleted
