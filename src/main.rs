@@ -83,7 +83,8 @@ fn main() {
                             }
                         };
 
-                    let db = match db::DB::open(&root) {
+                    // Open with model dimension; AllMiniLML6V2 is 384 dims
+                    let db = match db::DB::open_with_dim(&root, 384) {
                         Ok(db) => db,
                         Err(err) => {
                             eprintln!("error: failed to open sqlite index: {}", err);
@@ -114,11 +115,66 @@ fn main() {
                 }
             }
         }
-        Commands::Query {
-            query: _,
-            num_results: _,
-        } => {
-            todo!("implement query subcommand")
+        Commands::Query { query, num_results } => {
+            // Resolve repo root from current working directory
+            let cwd = match std::env::current_dir() {
+                Ok(dir) => dir,
+                Err(err) => {
+                    eprintln!("error: failed to read current directory: {}", err);
+                    std::process::exit(2);
+                }
+            };
+            let root = match index::find_git_root(&cwd) {
+                Some(dir) => dir,
+                None => {
+                    eprintln!("error: not inside a git repository: {}", cwd.display());
+                    std::process::exit(2);
+                }
+            };
+
+            // Embed the query string
+            let mut embedder = match embed::Embedder::new_default() {
+                Ok(e) => e,
+                Err(err) => {
+                    eprintln!("error: failed to init embedder: {}", err);
+                    std::process::exit(2);
+                }
+            };
+            let embedding = match embedder.embed([query.as_str()]) {
+                Ok(mut v) => {
+                    if v.is_empty() {
+                        eprintln!("error: empty embedding");
+                        std::process::exit(2);
+                    }
+                    v.remove(0)
+                }
+                Err(err) => {
+                    eprintln!("error: failed to embed query: {}", err);
+                    std::process::exit(2);
+                }
+            };
+
+            // Open DB and perform KNN
+            let db = match db::DB::open_read(&root) {
+                Ok(db) => db,
+                Err(err) => {
+                    eprintln!("error: failed to open sqlite index: {}", err);
+                    std::process::exit(2);
+                }
+            };
+
+            match db.knn(&embedding, num_results) {
+                Ok(results) => {
+                    for (path, line, dist) in results {
+                        let rel = path.strip_prefix(&root).unwrap_or(&path);
+                        println!("{}:{} {:.3}", rel.display(), line, dist);
+                    }
+                }
+                Err(err) => {
+                    eprintln!("error: knn failed: {}", err);
+                    std::process::exit(2);
+                }
+            }
         }
         Commands::Clean {} => {
             // Resolve repo root from current working directory

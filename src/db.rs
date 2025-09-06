@@ -27,7 +27,7 @@ pub struct DB {
 }
 
 impl DB {
-    pub fn open(repo_root: &Path) -> Result<Self> {
+    pub fn open_with_dim(repo_root: &Path, dim: usize) -> Result<Self> {
         let db_path = repo_root.join(".cearch").join("index.sqlite");
         std::fs::create_dir_all(db_path.parent().unwrap())?;
         ensure_vec_extension_loaded();
@@ -44,11 +44,21 @@ impl DB {
                 name TEXT NOT NULL,
                 code TEXT NOT NULL
             );
-            CREATE VIRTUAL TABLE IF NOT EXISTS vec_index USING vec0(
-                embedding float[384]
-            );
             "#,
         )?;
+        // Create vector index table with specified dimension if not exists
+        let sql = format!(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS vec_index USING vec0(embedding float[{}]);",
+            dim
+        );
+        conn.execute_batch(&sql)?;
+        Ok(DB { conn })
+    }
+
+    pub fn open_read(repo_root: &Path) -> Result<Self> {
+        let db_path = repo_root.join(".cearch").join("index.sqlite");
+        ensure_vec_extension_loaded();
+        let conn = Connection::open(db_path)?;
         Ok(DB { conn })
     }
 
@@ -78,11 +88,16 @@ impl DB {
 
     pub fn knn(&self, query: &[f32], k: usize) -> Result<Vec<(PathBuf, usize, f32)>> {
         let mut stmt = self.conn.prepare(
-            "SELECT s.path, s.line, distance \
-             FROM vec_index \
-             JOIN symbols s ON s.id = vec_index.rowid \
-             WHERE embedding MATCH ?1 \
-             ORDER BY distance LIMIT ?2",
+            "SELECT s.path, s.line, v.distance \
+             FROM ( \
+               SELECT rowid, distance \
+               FROM vec_index \
+               WHERE embedding MATCH ?1 \
+               ORDER BY distance \
+               LIMIT ?2 \
+             ) AS v \
+             JOIN symbols s ON s.id = v.rowid \
+             ORDER BY v.distance",
         )?;
         let rows = stmt.query_map(params![f32s_to_blob(query), k as i64], |row| {
             let path: String = row.get(0)?;
