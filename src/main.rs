@@ -244,28 +244,36 @@ fn main() {
                     std::process::exit(2);
                 }
             };
-
-            let db_path = root.join(".cearch").join("index.sqlite");
-            let wal_path = root.join(".cearch").join("index.sqlite-wal");
-            let shm_path = root.join(".cearch").join("index.sqlite-shm");
-
-            // Helper to try deletion and ignore NotFound
-            fn try_remove(p: &std::path::Path) -> std::io::Result<()> {
-                match std::fs::remove_file(p) {
-                    Ok(()) => Ok(()),
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                    Err(e) => Err(e),
+            let cearch_dir = root.join(".cearch");
+            if let Err(err) = std::fs::remove_dir_all(&cearch_dir) {
+                if err.kind() != std::io::ErrorKind::NotFound {
+                    eprintln!("error: failed to delete .cearch directory: {}", err);
+                    std::process::exit(2);
                 }
-            }
-
-            if let Err(err) = try_remove(&db_path)
-                .and_then(|_| try_remove(&wal_path))
-                .and_then(|_| try_remove(&shm_path))
-            {
-                eprintln!("error: failed to delete index: {}", err);
-                std::process::exit(2);
             } else {
-                println!("cleaned: {}", db_path.display());
+                // Remove .cearch entries from .gitignore if present
+                let gi = root.join(".gitignore");
+                if let Ok(contents) = std::fs::read_to_string(&gi) {
+                    let filtered = contents
+                        .lines()
+                        .filter(|l| {
+                            let t = l.trim();
+                            !(t == ".cearch/" || t == ".cearch")
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    if let Err(err) = std::fs::write(
+                        &gi,
+                        if filtered.is_empty() {
+                            String::new()
+                        } else {
+                            format!("{}\n", filtered)
+                        },
+                    ) {
+                        eprintln!("warn: failed to update {}: {}", gi.display(), err);
+                    }
+                }
+                println!("cleaned: {}", cearch_dir.display());
             }
         }
     }

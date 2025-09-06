@@ -13,13 +13,6 @@ impl Embedder {
         Ok(Self { model })
     }
 
-    pub fn with_model(model: EmbeddingModel) -> Result<Self> {
-        let cache_dir = repo_cearch_dir()?;
-        let options: TextInitOptions = TextInitOptions::new(model).with_cache_dir(cache_dir);
-        let model = TextEmbedding::try_new(options)?;
-        Ok(Self { model })
-    }
-
     pub fn embed<'a, T: AsRef<str> + 'a>(
         &mut self,
         snippets: impl IntoIterator<Item = T>,
