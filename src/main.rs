@@ -24,6 +24,8 @@ enum Commands {
         #[arg(long)]
         force: bool,
     },
+    /// Initialize cearch in this repo (.cearch dir, .gitignore, and model cache)
+    Init {},
     /// Query the index with a code snippet or description
     Query {
         /// The query string
@@ -111,6 +113,56 @@ fn main() {
                 }
                 Err(err) => {
                     eprintln!("error: {}", err);
+                    std::process::exit(2);
+                }
+            }
+        }
+        Commands::Init {} => {
+            // Resolve repo root
+            let cwd = match std::env::current_dir() {
+                Ok(dir) => dir,
+                Err(err) => {
+                    eprintln!("error: failed to read current directory: {}", err);
+                    std::process::exit(2);
+                }
+            };
+            let root = match index::find_git_root(&cwd) {
+                Some(dir) => dir,
+                None => {
+                    eprintln!("error: not inside a git repository: {}", cwd.display());
+                    std::process::exit(2);
+                }
+            };
+            let cearch_dir = root.join(".cearch");
+            if let Err(err) = std::fs::create_dir_all(&cearch_dir) {
+                eprintln!("error: creating {}: {}", cearch_dir.display(), err);
+                std::process::exit(2);
+            }
+            // Update .gitignore
+            let gi = root.join(".gitignore");
+            let entry = ".cearch/\n";
+            let needs_append = match std::fs::read_to_string(&gi) {
+                Ok(s) => !s.lines().any(|l| {
+                    let t = l.trim();
+                    t == ".cearch/" || t == ".cearch"
+                }),
+                Err(_) => true,
+            };
+            if needs_append {
+                if let Err(err) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&gi)
+                    .and_then(|mut f| std::io::Write::write_all(&mut f, entry.as_bytes()))
+                {
+                    eprintln!("warn: failed to update {}: {}", gi.display(), err);
+                }
+            }
+            // Pre-download default model into cache (Embedder uses .cearch)
+            match embed::Embedder::new_default() {
+                Ok(_) => println!("initialized: {}", cearch_dir.display()),
+                Err(err) => {
+                    eprintln!("error: failed to initialize model cache: {}", err);
                     std::process::exit(2);
                 }
             }
