@@ -1,5 +1,4 @@
-use anyhow::Result;
-use directories::ProjectDirs;
+use anyhow::{Result, anyhow};
 use fastembed::{EmbeddingModel, TextEmbedding, TextInitOptions};
 
 pub struct Embedder {
@@ -8,16 +7,9 @@ pub struct Embedder {
 
 impl Embedder {
     pub fn new_default() -> Result<Self> {
-        let cache_dir = default_cache_dir();
+        let cache_dir = repo_cearch_dir()?;
         let opts = TextInitOptions::default().with_cache_dir(cache_dir);
         let model = TextEmbedding::try_new(opts)?;
-        Ok(Self { model })
-    }
-
-    pub fn with_model(model: EmbeddingModel) -> Result<Self> {
-        let cache_dir = default_cache_dir();
-        let options: TextInitOptions = TextInitOptions::new(model).with_cache_dir(cache_dir);
-        let model = TextEmbedding::try_new(options)?;
         Ok(Self { model })
     }
 
@@ -34,26 +26,13 @@ impl Embedder {
     }
 }
 
-fn default_cache_dir() -> std::path::PathBuf {
-    // ProjectDirs uses reverse domain + app name to pick platform-appropriate directories
-    // e.g., macOS: ~/Library/Caches/cearch/cearch, Linux: ~/.cache/cearch/cearch, Windows: %LOCALAPPDATA%\cearch\cearch\cache
-    if let Some(dirs) = ProjectDirs::from("com", "cearch", "cearch") {
-        let p = dirs.cache_dir();
-        std::fs::create_dir_all(p).ok();
-        p.to_path_buf()
-    } else {
-        // Fallback to XDG-like
-        let base = std::env::var("XDG_CACHE_HOME")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|_| {
-                std::env::var("HOME")
-                    .map(|h| std::path::PathBuf::from(h).join(".cache"))
-                    .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| ".".into()))
-            });
-        let p = base.join("cearch");
-        std::fs::create_dir_all(&p).ok();
-        p
-    }
+fn repo_cearch_dir() -> Result<std::path::PathBuf> {
+    let cwd = std::env::current_dir()?;
+    let root = crate::index::find_git_root(&cwd)
+        .ok_or_else(|| anyhow!("not inside a git repository: {}", cwd.display()))?;
+    let dir = root.join(".cearch");
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
 }
 
 #[cfg(test)]
