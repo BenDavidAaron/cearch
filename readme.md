@@ -20,13 +20,4 @@
 1. Make commits
 1. Submit a PR
 
-## TODOs
-
-- Embedding model selection
-- Bring your own embedding models
-- Graph embed AST of logical Units?
-- Support for JavaScript
-- output in `.json` or `.yaml`
-- refactor per-repository operations into a mod
-- clean up interfaces
-- write tests
+- Please consider searching the ./plans/\* directory for open issues

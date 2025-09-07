@@ -1,0 +1,15 @@
+# 2025-09-06
+* Shipped MVP
+
+? Fulltext Search of functions
+? Paralellize embeddings during indexing
+? Incremental re-indexing
+? tests
+? JSON output
+? Other langauage support (JS, Java, C++)
+? Selecting embedding models
+? Graph Embeddings of Function AST Graphs
+
+Well, I got the core workflow done. It's mostly vibecoded. 
+So I'm going to consider refactors as I start adding new features like text search or embedding model selection.
+I sent this version to @wegfawefgawefg and he found it interesting.
