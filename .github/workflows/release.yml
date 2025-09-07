@@ -81,19 +81,11 @@ jobs:
         with:
           path: dist
 
-      - name: Generate release notes
-        id: notes
-        uses: release-drafter/release-drafter@v6
-        with:
-          disable-autolabeler: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
-          body: ${{ steps.notes.outputs.body || format('Release {0}', github.ref_name) }}
+          generate_release_notes: true
           files: |
             dist/**/cearch-*.tar.gz
             dist/**/cearch-*.zip
