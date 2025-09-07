@@ -8,9 +8,13 @@ fn ensure_vec_extension_loaded() {
     static INIT: Once = Once::new();
     INIT.call_once(|| unsafe {
         use rusqlite::ffi::sqlite3_auto_extension;
-        sqlite3_auto_extension(Some(std::mem::transmute(
-            sqlite_vec::sqlite3_vec_init as *const (),
-        )));
+        // Provide explicit transmute annotations per clippy recommendation
+        let init_fn: unsafe extern "C" fn(
+            *mut rusqlite::ffi::sqlite3,
+            *mut *mut i8,
+            *const rusqlite::ffi::sqlite3_api_routines,
+        ) -> i32 = std::mem::transmute::<*const (), _>(sqlite_vec::sqlite3_vec_init as *const ());
+        sqlite3_auto_extension(Some(init_fn));
     });
 }
 

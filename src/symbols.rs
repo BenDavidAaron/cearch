@@ -53,12 +53,7 @@ fn language_registry() -> &'static [LanguageConfig] {
 
 fn language_config_for_path(path: &Path) -> Option<&'static LanguageConfig> {
     let ext = path.extension().and_then(|e| e.to_str())?;
-    for cfg in language_registry() {
-        if cfg.extensions.iter().any(|e| *e == ext) {
-            return Some(cfg);
-        }
-    }
-    None
+    language_registry().iter().find(|&cfg| cfg.extensions.iter().any(|e| *e == ext))
 }
 
 /// Enumerate symbols (functions/classes) for a single source file.

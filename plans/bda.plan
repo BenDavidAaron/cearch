@@ -9,6 +9,7 @@
 ? Other langauage support (JS, Java, C++)
 ? Selecting embedding models
 ? Graph Embeddings of Function AST Graphs
+? Progress reporting of indexes
 
 Well, I got the core workflow done. It's mostly vibecoded. 
 So I'm going to consider refactors as I start adding new features like text search or embedding model selection.
