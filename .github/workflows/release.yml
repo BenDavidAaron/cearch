@@ -1,0 +1,101 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build release binaries
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_suffix: linux-x64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_suffix: macos-x64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_suffix: macos-arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_suffix: windows-x64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Prepare artifact (unix)
+        if: runner.os != 'Windows'
+        run: |
+          bin_path=target/${{ matrix.target }}/release/cearch
+          out="cearch-${{ github.ref_name }}-${{ matrix.artifact_suffix }}"
+          mkdir -p dist
+          cp "$bin_path" "dist/cearch"
+          tar -czf "dist/$out.tar.gz" -C dist cearch
+
+      - name: Prepare artifact (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $BinPath = "target/${{ matrix.target }}/release/cearch.exe"
+          $Out = "cearch-${{ github.ref_name }}-${{ matrix.artifact_suffix }}.zip"
+          mkdir dist
+          Copy-Item $BinPath dist/cearch.exe
+          Compress-Archive -Path dist/cearch.exe -DestinationPath "dist/$Out"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cearch-${{ github.ref_name }}-${{ matrix.artifact_suffix }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+
+  publish:
+    name: Publish GitHub Release
+    needs: build-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Generate release notes
+        id: notes
+        uses: release-drafter/release-drafter@v6
+        with:
+          disable-autolabeler: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body: ${{ steps.notes.outputs.body || format('Release {0}', github.ref_name) }}
+          files: |
+            dist/**/cearch-*.tar.gz
+            dist/**/cearch-*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
