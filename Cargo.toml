@@ -3,7 +3,6 @@ categories = ["development-tools", "text-processing", "command-line-utilities"]
 edition = "2024"
 keywords = ["codebase", "search", "semantic", "similarity"]
 license = "AGPL-3.0-only"
-license-file = "LICENSE"
 name = "cearch"
 version = "0.1.0"
 
