@@ -10,6 +10,7 @@ version = "0.1.0"
 anyhow = "1"
 clap = {version = "4.5.47", features = ["derive"]}
 fastembed = "5.1.0"
+indicatif = "0.18.0"
 rusqlite = {version = "0.37.0", features = ["bundled"]}
 sqlite-vec = "0.1.6"
 streaming-iterator = "0.1"
