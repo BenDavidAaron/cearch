@@ -63,7 +63,8 @@ fn main() {
             match index::list_git_tracked_files(&root) {
                 Ok(files) => {
                     let progress_bar = ProgressBar::new(files.len() as u64);
-                    let progress_style = ProgressStyle::default_bar().template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} {msg}");
+                    progress_bar.set_message(format!("Indexing repo"));
+                    let progress_style = ProgressStyle::default_bar().template("{spinner:.green} {msg} [{elapsed_precise}] [{bar:20.white/black}] {pos}/{len}");
                     match progress_style {
                         Ok(style) => progress_bar.set_style(style),
                         Err(err) => eprintln!("error: failed to set progress style: {}", err),
