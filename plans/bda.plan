@@ -1,3 +1,9 @@
+# 2025-09-08
+* Progress reporting of indexes
+- Graph Embeddings of function AST Graphs
+
+I added progress reporting of of indexes, looked a bit for graph embedding crates, but I need a full saturday to figure that out.
+
 # 2025-09-06
 * Shipped MVP
 

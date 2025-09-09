@@ -4,6 +4,8 @@ mod embed;
 mod index;
 mod symbols;
 
+use indicatif::{ProgressBar, ProgressStyle};
+
 #[derive(Parser, Debug)]
 #[command(
     name = "cearch",
@@ -60,8 +62,16 @@ fn main() {
             };
             match index::list_git_tracked_files(&root) {
                 Ok(files) => {
+                    let progress_bar = ProgressBar::new(files.len() as u64);
+                    progress_bar.set_message(format!("Indexing repo"));
+                    let progress_style = ProgressStyle::default_bar().template("{spinner:.green} {msg} [{elapsed_precise}] [{bar:20.white/black}] {pos}/{len}");
+                    match progress_style {
+                        Ok(style) => progress_bar.set_style(style),
+                        Err(err) => eprintln!("error: failed to set progress style: {}", err),
+                    }
                     let mut all_symbols = Vec::new();
                     for f in files {
+                        progress_bar.inc(1);
                         match symbols::enumerate_symbols_in_file(&f) {
                             Ok(mut symbols) => all_symbols.append(&mut symbols),
                             Err(err) => eprintln!("warn: failed to parse {}: {}", f.display(), err),
