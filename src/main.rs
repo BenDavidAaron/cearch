@@ -4,7 +4,7 @@ mod embed;
 mod index;
 mod symbols;
 
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -25,6 +25,9 @@ enum Commands {
         /// Optional flag to force re-indexing
         #[arg(long)]
         force: bool,
+        /// Verbose output (show progress bars)
+        #[arg(short = 'v', long)]
+        verbose: bool,
     },
     /// Initialize cearch in this repo (.cearch dir, .gitignore, and model cache)
     Init {},
@@ -44,7 +47,7 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Index { force: _ } => {
+        Commands::Index { force: _, verbose } => {
             let cwd = match std::env::current_dir() {
                 Ok(dir) => dir,
                 Err(err) => {
@@ -62,22 +65,7 @@ fn main() {
             };
             match index::list_git_tracked_files(&root) {
                 Ok(files) => {
-                    let progress_bar = ProgressBar::new(files.len() as u64);
-                    progress_bar.set_message(format!("Indexing repo"));
-                    let progress_style = ProgressStyle::default_bar().template("{spinner:.green} {msg} [{elapsed_precise}] [{bar:20.white/black}] {pos}/{len}");
-                    match progress_style {
-                        Ok(style) => progress_bar.set_style(style),
-                        Err(err) => eprintln!("error: failed to set progress style: {}", err),
-                    }
-                    let mut all_symbols = Vec::new();
-                    for f in files {
-                        progress_bar.inc(1);
-                        match symbols::enumerate_symbols_in_file(&f) {
-                            Ok(mut symbols) => all_symbols.append(&mut symbols),
-                            Err(err) => eprintln!("warn: failed to parse {}: {}", f.display(), err),
-                        }
-                    }
-
+                    // Initialize embedder up-front (may download/cold-start); avoid drawing bars during this
                     let mut embedder = match embed::Embedder::new_default() {
                         Ok(e) => e,
                         Err(err) => {
@@ -86,16 +74,7 @@ fn main() {
                         }
                     };
 
-                    let embeddings =
-                        match embedder.embed(all_symbols.iter().map(|s| s.code.as_str())) {
-                            Ok(v) => v,
-                            Err(err) => {
-                                eprintln!("error: failed to embed: {}", err);
-                                std::process::exit(2);
-                            }
-                        };
-
-                    // Open with model dimension; AllMiniLML6V2 is 384 dims
+                    // Open DB with model dimension; AllMiniLML6V2 is 384 dims
                     let db = match db::DB::open_with_dim(&root, 384) {
                         Ok(db) => db,
                         Err(err) => {
@@ -104,21 +83,138 @@ fn main() {
                         }
                     };
 
-                    for (sym, emb) in all_symbols.into_iter().zip(embeddings.into_iter()) {
-                        let kind = match sym.kind {
-                            symbols::SymbolKind::Function => "fn",
-                            symbols::SymbolKind::Class => "class",
-                        };
-                        if let Err(err) =
-                            db.insert_symbol(&sym.path, sym.line, kind, &sym.name, &sym.code, &emb)
-                        {
-                            eprintln!(
-                                "warn: failed to insert symbol {}:{}: {}",
-                                sym.path.display(),
-                                sym.line,
-                                err
-                            );
+                    // Optional progress
+                    let mp = if verbose {
+                        Some(MultiProgress::new())
+                    } else {
+                        None
+                    };
+                    let main_pb = if let Some(ref mp) = mp {
+                        let pb = mp.add(ProgressBar::new(files.len() as u64));
+                        if let Ok(style) = ProgressStyle::with_template(
+                            "{spinner:.green} {pos}/{len} [{bar:40.white/black}] {per_sec} ETA {eta} {msg}",
+                        ) {
+                            pb.set_style(style.progress_chars("=> "));
                         }
+                        pb.set_message(String::from("Indexing repo"));
+                        Some(pb)
+                    } else {
+                        None
+                    };
+
+                    // Process each file: parse symbols, embed in chunks with a per-file bar, then insert
+                    for f in files {
+                        let symbols_in_file = match symbols::enumerate_symbols_in_file(&f) {
+                            Ok(v) => v,
+                            Err(err) => {
+                                if let Some(ref mp) = mp {
+                                    let _ = mp.println(format!(
+                                        "warn: failed to parse {}: {}",
+                                        f.display(),
+                                        err
+                                    ));
+                                } else {
+                                    eprintln!("warn: failed to parse {}: {}", f.display(), err);
+                                }
+                                if let Some(ref main_pb) = main_pb {
+                                    main_pb.inc(1);
+                                }
+                                continue;
+                            }
+                        };
+
+                        if symbols_in_file.is_empty() {
+                            if let Some(ref main_pb) = main_pb {
+                                main_pb.inc(1);
+                            }
+                            continue;
+                        }
+
+                        // Optional per-file bar
+                        let file_pb = if let Some(ref mp) = mp {
+                            let pb = mp.add(ProgressBar::new(symbols_in_file.len() as u64));
+                            if let Ok(style) = ProgressStyle::with_template(
+                                "  ↳ {spinner:.green} {pos}/{len} [{bar.white/black}] {per_sec} {msg}",
+                            ) {
+                                pb.set_style(style.progress_chars("=> "));
+                            }
+                            if let Some(name) = f.file_name().and_then(|s| s.to_str()) {
+                                pb.set_message(name.to_string());
+                            }
+                            Some(pb)
+                        } else {
+                            None
+                        };
+
+                        // Embed in small batches to report progress without interfering with main bar
+                        let batch_size: usize = 64;
+                        let mut idx = 0usize;
+                        while idx < symbols_in_file.len() {
+                            let end = usize::min(idx + batch_size, symbols_in_file.len());
+                            let chunk = &symbols_in_file[idx..end];
+                            let codes = chunk.iter().map(|s| s.code.as_str());
+                            let embeddings_chunk = match embedder.embed(codes) {
+                                Ok(v) => v,
+                                Err(err) => {
+                                    if let Some(ref mp) = mp {
+                                        let _ = mp.println(format!(
+                                            "warn: failed to embed symbols for {}: {}",
+                                            f.display(),
+                                            err
+                                        ));
+                                    } else {
+                                        eprintln!(
+                                            "warn: failed to embed symbols for {}: {}",
+                                            f.display(),
+                                            err
+                                        );
+                                    }
+                                    break;
+                                }
+                            };
+
+                            for (sym, emb) in chunk.iter().zip(embeddings_chunk.into_iter()) {
+                                let kind = match sym.kind {
+                                    symbols::SymbolKind::Function => "fn",
+                                    symbols::SymbolKind::Class => "class",
+                                };
+                                if let Err(err) = db.insert_symbol(
+                                    &sym.path, sym.line, kind, &sym.name, &sym.code, &emb,
+                                ) {
+                                    if let Some(ref mp) = mp {
+                                        let _ = mp.println(format!(
+                                            "warn: failed to insert symbol {}:{}: {}",
+                                            sym.path.display(),
+                                            sym.line,
+                                            err
+                                        ));
+                                    } else {
+                                        eprintln!(
+                                            "warn: failed to insert symbol {}:{}: {}",
+                                            sym.path.display(),
+                                            sym.line,
+                                            err
+                                        );
+                                    }
+                                }
+                            }
+
+                            if let Some(ref file_pb) = file_pb {
+                                file_pb.inc((end - idx) as u64);
+                            }
+                            idx = end;
+                        }
+
+                        if let Some(file_pb) = file_pb {
+                            file_pb.finish_and_clear();
+                        }
+                        if let Some(ref main_pb) = main_pb {
+                            main_pb.inc(1);
+                        }
+                    }
+
+                    if let Some(main_pb) = main_pb {
+                        main_pb.finish_with_message("indexing complete");
                     }
                 }
                 Err(err) => {
