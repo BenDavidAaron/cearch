@@ -2,7 +2,6 @@ use clap::{Parser, Subcommand};
 use std::path::Path;
 mod ast_embed;
 mod db;
-mod embed;
 mod index;
 mod symbols;
 
@@ -199,14 +198,6 @@ fn main() {
                     .and_then(|mut f| std::io::Write::write_all(&mut f, entry.as_bytes()))
                 {
                     eprintln!("warn: failed to update {}: {}", gi.display(), err);
-                }
-            }
-            // Pre-download default model into cache (Embedder uses .cearch)
-            match embed::Embedder::new_default() {
-                Ok(_) => println!("initialized: {}", cearch_dir.display()),
-                Err(err) => {
-                    eprintln!("error: failed to initialize model cache: {}", err);
-                    std::process::exit(2);
                 }
             }
         }
