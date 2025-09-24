@@ -1,3 +1,11 @@
+# 2025-09-23
+* Simpler Embeddings using structural features
+
+Used a simpler embedding technique that doesn't depend on an embedding model or 3rd party libraries.
+Instead, it uses a combination of structural features such as function name, parameters, and return type to generate embeddings.
+
+This removed an external dependency, makes per repo setup and indexing faster, and reduced the storage footprint.
+
 # 2025-09-08
 * Progress reporting of indexes
 - Graph Embeddings of function AST Graphs
@@ -17,6 +25,6 @@ I added progress reporting of of indexes, looked a bit for graph embedding crate
 ? Graph Embeddings of Function AST Graphs
 ? Progress reporting of indexes
 
-Well, I got the core workflow done. It's mostly vibecoded. 
+Well, I got the core workflow done. It's mostly vibecoded.
 So I'm going to consider refactors as I start adding new features like text search or embedding model selection.
 I sent this version to @wegfawefgawefg and he found it interesting.

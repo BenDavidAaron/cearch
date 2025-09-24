@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
+use std::path::Path;
+mod ast_embed;
 mod db;
-mod embed;
 mod index;
 mod symbols;
 
@@ -65,17 +66,12 @@ fn main() {
             };
             match index::list_git_tracked_files(&root) {
                 Ok(files) => {
-                    // Initialize embedder up-front (may download/cold-start); avoid drawing bars during this
-                    let mut embedder = match embed::Embedder::new_default() {
-                        Ok(e) => e,
-                        Err(err) => {
-                            eprintln!("error: failed to init embedder: {}", err);
-                            std::process::exit(2);
-                        }
-                    };
+                    // Get AST embedder dimension
+                    let embedder = symbols::SymbolEmbedder::new();
+                    let ast_dim = embedder.dimension();
 
-                    // Open DB with model dimension; AllMiniLML6V2 is 384 dims
-                    let db = match db::DB::open_with_dim(&root, 384) {
+                    // Open DB with AST embedding dimension
+                    let db = match db::DB::open_with_dim(&root, ast_dim) {
                         Ok(db) => db,
                         Err(err) => {
                             eprintln!("error: failed to open sqlite index: {}", err);
@@ -102,112 +98,52 @@ fn main() {
                         None
                     };
 
-                    // Process each file: parse symbols, embed in chunks with a per-file bar, then insert
-                    for f in files {
-                        let symbols_in_file = match symbols::enumerate_symbols_in_file(&f) {
-                            Ok(v) => v,
-                            Err(err) => {
-                                if let Some(ref mp) = mp {
-                                    let _ = mp.println(format!(
-                                        "warn: failed to parse {}: {}",
-                                        f.display(),
-                                        err
-                                    ));
-                                } else {
-                                    eprintln!("warn: failed to parse {}: {}", f.display(), err);
-                                }
-                                if let Some(ref main_pb) = main_pb {
-                                    main_pb.inc(1);
-                                }
-                                continue;
-                            }
+                    // Process files with AST embeddings using batch processing for vocabulary consistency
+                    let file_paths: Vec<&Path> = files.iter().map(|p| p.as_path()).collect();
+                    let all_symbols = match symbols::enumerate_symbols_batch(&file_paths) {
+                        Ok(symbols) => symbols,
+                        Err(err) => {
+                            eprintln!("error: failed to process symbols: {}", err);
+                            std::process::exit(2);
+                        }
+                    };
+
+                    // Insert symbols with progress tracking
+                    if let Some(ref main_pb) = main_pb {
+                        main_pb.set_length(all_symbols.len() as u64);
+                    }
+
+                    for sym in all_symbols {
+                        let kind = match sym.kind {
+                            symbols::SymbolKind::Function => "fn",
+                            symbols::SymbolKind::Class => "class",
                         };
 
-                        if symbols_in_file.is_empty() {
-                            if let Some(ref main_pb) = main_pb {
-                                main_pb.inc(1);
+                        if let Err(err) = db.insert_symbol(
+                            &sym.path,
+                            sym.line,
+                            kind,
+                            &sym.name,
+                            &sym.code,
+                            &sym.ast_embedding,
+                        ) {
+                            if let Some(ref mp) = mp {
+                                let _ = mp.println(format!(
+                                    "warn: failed to insert symbol {}:{}: {}",
+                                    sym.path.display(),
+                                    sym.line,
+                                    err
+                                ));
+                            } else {
+                                eprintln!(
+                                    "warn: failed to insert symbol {}:{}: {}",
+                                    sym.path.display(),
+                                    sym.line,
+                                    err
+                                );
                             }
-                            continue;
                         }
 
-                        // Optional per-file bar
-                        let file_pb = if let Some(ref mp) = mp {
-                            let pb = mp.add(ProgressBar::new(symbols_in_file.len() as u64));
-                            if let Ok(style) = ProgressStyle::with_template(
-                                "  ↳ {spinner:.green} {pos}/{len} [{bar.white/black}] {per_sec} {msg}",
-                            ) {
-                                pb.set_style(style.progress_chars("=> "));
-                            }
-                            if let Some(name) = f.file_name().and_then(|s| s.to_str()) {
-                                pb.set_message(name.to_string());
-                            }
-                            Some(pb)
-                        } else {
-                            None
-                        };
-
-                        // Embed in small batches to report progress without interfering with main bar
-                        let batch_size: usize = 64;
-                        let mut idx = 0usize;
-                        while idx < symbols_in_file.len() {
-                            let end = usize::min(idx + batch_size, symbols_in_file.len());
-                            let chunk = &symbols_in_file[idx..end];
-                            let codes = chunk.iter().map(|s| s.code.as_str());
-                            let embeddings_chunk = match embedder.embed(codes) {
-                                Ok(v) => v,
-                                Err(err) => {
-                                    if let Some(ref mp) = mp {
-                                        let _ = mp.println(format!(
-                                            "warn: failed to embed symbols for {}: {}",
-                                            f.display(),
-                                            err
-                                        ));
-                                    } else {
-                                        eprintln!(
-                                            "warn: failed to embed symbols for {}: {}",
-                                            f.display(),
-                                            err
-                                        );
-                                    }
-                                    break;
-                                }
-                            };
-
-                            for (sym, emb) in chunk.iter().zip(embeddings_chunk.into_iter()) {
-                                let kind = match sym.kind {
-                                    symbols::SymbolKind::Function => "fn",
-                                    symbols::SymbolKind::Class => "class",
-                                };
-                                if let Err(err) = db.insert_symbol(
-                                    &sym.path, sym.line, kind, &sym.name, &sym.code, &emb,
-                                ) {
-                                    if let Some(ref mp) = mp {
-                                        let _ = mp.println(format!(
-                                            "warn: failed to insert symbol {}:{}: {}",
-                                            sym.path.display(),
-                                            sym.line,
-                                            err
-                                        ));
-                                    } else {
-                                        eprintln!(
-                                            "warn: failed to insert symbol {}:{}: {}",
-                                            sym.path.display(),
-                                            sym.line,
-                                            err
-                                        );
-                                    }
-                                }
-                            }
-
-                            if let Some(ref file_pb) = file_pb {
-                                file_pb.inc((end - idx) as u64);
-                            }
-                            idx = end;
-                        }
-
-                        if let Some(file_pb) = file_pb {
-                            file_pb.finish_and_clear();
-                        }
                         if let Some(ref main_pb) = main_pb {
                             main_pb.inc(1);
                         }
@@ -264,14 +200,6 @@ fn main() {
                     eprintln!("warn: failed to update {}: {}", gi.display(), err);
                 }
             }
-            // Pre-download default model into cache (Embedder uses .cearch)
-            match embed::Embedder::new_default() {
-                Ok(_) => println!("initialized: {}", cearch_dir.display()),
-                Err(err) => {
-                    eprintln!("error: failed to initialize model cache: {}", err);
-                    std::process::exit(2);
-                }
-            }
         }
         Commands::Query { query, num_results } => {
             // Resolve repo root from current working directory
@@ -290,24 +218,13 @@ fn main() {
                 }
             };
 
-            // Embed the query string
-            let mut embedder = match embed::Embedder::new_default() {
-                Ok(e) => e,
+            // Create AST embedder and try to embed the query as code
+            let embedder = symbols::SymbolEmbedder::new();
+            let embedding = match symbols::embed_query_snippet(&query, &embedder) {
+                Ok(emb) => emb,
                 Err(err) => {
-                    eprintln!("error: failed to init embedder: {}", err);
-                    std::process::exit(2);
-                }
-            };
-            let embedding = match embedder.embed([query.as_str()]) {
-                Ok(mut v) => {
-                    if v.is_empty() {
-                        eprintln!("error: empty embedding");
-                        std::process::exit(2);
-                    }
-                    v.remove(0)
-                }
-                Err(err) => {
-                    eprintln!("error: failed to embed query: {}", err);
+                    eprintln!("error: failed to parse query as code: {}", err);
+                    eprintln!("Try providing a valid code snippet in Rust or Python syntax.");
                     std::process::exit(2);
                 }
             };
